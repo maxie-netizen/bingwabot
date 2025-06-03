@@ -2,14 +2,18 @@ import os
 import requests
 import base64
 from datetime import datetime
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup
+)
 from telegram.ext import (
-    Updater,
+    Application,
     CommandHandler,
     CallbackQueryHandler,
     MessageHandler,
-    Filters,
-    CallbackContext,
+    filters,
+    ContextTypes
 )
 from dotenv import load_dotenv
 from database import log_transaction, get_user_transactions
@@ -84,7 +88,7 @@ def initiate_stk_push(phone, amount, bundle_code, user_id):
         log_transaction(user_id, phone, bundle_code, amount, checkout_request_id)
     return response.json()
 
-def start(update: Update, context: CallbackContext) -> None:
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send welcome message and main menu"""
     user = update.effective_user
     keyboard = [
@@ -95,16 +99,16 @@ def start(update: Update, context: CallbackContext) -> None:
         [InlineKeyboardButton("🆘 Help", callback_data='help')],
     ]
     
-    update.message.reply_text(
+    await update.message.reply_text(
         f"Karibu {user.first_name} to Bingwa Sokoni by Safaricom!\n\n"
         "I can help you purchase mobile data, SMS, and calling minute packages easily via M-Pesa.",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-def show_bundles(update: Update, context: CallbackContext) -> None:
+async def show_bundles(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show bundles for selected category"""
     query = update.callback_query
-    query.answer()
+    await query.answer()
     
     bundle_type = query.data
     keyboard = []
@@ -116,15 +120,15 @@ def show_bundles(update: Update, context: CallbackContext) -> None:
     
     keyboard.append([InlineKeyboardButton("🔙 Back to Menu", callback_data='back')])
     
-    query.edit_message_text(
+    await query.edit_message_text(
         text=f"Please select a {bundle_type} bundle:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-def request_phone_number(update: Update, context: CallbackContext) -> None:
+async def request_phone_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Request phone number for bundle purchase"""
     query = update.callback_query
-    query.answer()
+    await query.answer()
     
     _, bundle_type, bundle_code, price = query.data.split('_')
     USER_STATES[query.from_user.id] = {
@@ -139,13 +143,13 @@ def request_phone_number(update: Update, context: CallbackContext) -> None:
         bundle_code
     )
     
-    query.edit_message_text(
+    await query.edit_message_text(
         f"Selected: {bundle_name} @ Ksh {price}\n\n"
         "Please enter the Safaricom phone number to purchase for:\n"
         "Format: 07XXXXXXXX or 2547XXXXXXXX"
     )
 
-def process_phone_number(update: Update, context: CallbackContext) -> None:
+async def process_phone_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Process entered phone number and initiate payment"""
     user_id = update.message.from_user.id
     phone = update.message.text.strip()
@@ -153,7 +157,7 @@ def process_phone_number(update: Update, context: CallbackContext) -> None:
     # Validate phone number format
     if not (phone.startswith('2547') and len(phone) == 12) and \
        not (phone.startswith('07') and len(phone) == 10):
-        update.message.reply_text(
+        await update.message.reply_text(
             "Invalid phone format. Please use 07XXXXXXXX or 2547XXXXXXXX"
         )
         return
@@ -163,7 +167,7 @@ def process_phone_number(update: Update, context: CallbackContext) -> None:
     
     user_state = USER_STATES.get(user_id)
     if not user_state or user_state['step'] != 'awaiting_phone':
-        update.message.reply_text("Session expired. Please start over with /start")
+        await update.message.reply_text("Session expired. Please start over with /start")
         return
     
     response = initiate_stk_push(
@@ -184,7 +188,7 @@ def process_phone_number(update: Update, context: CallbackContext) -> None:
             [InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_{user_id}")],
         ]
         
-        update.message.reply_text(
+        await update.message.reply_text(
             f"Payment request sent to {phone}.\n\n"
             "1. Check your phone for M-Pesa STK Push\n"
             "2. Enter your M-Pesa PIN when prompted\n"
@@ -192,25 +196,25 @@ def process_phone_number(update: Update, context: CallbackContext) -> None:
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     else:
-        update.message.reply_text(
+        await update.message.reply_text(
             "Failed to initiate payment. Please try again later or contact support."
         )
 
-def check_payment_status(update: Update, context: CallbackContext) -> None:
+async def check_payment_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Check payment status"""
     query = update.callback_query
-    query.answer()
+    await query.answer()
     
     action, user_id = query.data.split('_')
     user_id = int(user_id)
     user_state = USER_STATES.get(user_id)
     
     if not user_state:
-        query.edit_message_text("Session expired. Please start over with /start")
+        await query.edit_message_text("Session expired. Please start over with /start")
         return
     
     if action == 'check':
-        query.edit_message_text(
+        await query.edit_message_text(
             "✅ Payment confirmed! Your bundle will be activated shortly.\n"
             f"You'll receive an SMS confirmation on {user_state['phone']}.\n\n"
             "Thank you for using Bingwa Sokoni!"
@@ -225,7 +229,7 @@ def check_payment_status(update: Update, context: CallbackContext) -> None:
         )
         
         if response.get('ResponseCode') == '0':
-            query.edit_message_text(
+            await query.edit_message_text(
                 f"Payment request resent to {user_state['phone']}.\n\n"
                 "1. Check your phone for M-Pesa STK Push\n"
                 "2. Enter your M-Pesa PIN when prompted\n"
@@ -233,23 +237,23 @@ def check_payment_status(update: Update, context: CallbackContext) -> None:
                 reply_markup=query.message.reply_markup
             )
         else:
-            query.edit_message_text("Failed to resend payment request. Please try again later.")
+            await query.edit_message_text("Failed to resend payment request. Please try again later.")
     elif action == 'cancel':
-        query.edit_message_text(
+        await query.edit_message_text(
             "Purchase cancelled. You can start a new purchase anytime with /start\n\n"
             "For assistance, contact Safaricom support: 0722000000"
         )
         del USER_STATES[user_id]
 
-def show_user_transactions(update: Update, context: CallbackContext) -> None:
+async def show_user_transactions(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Display user's transaction history"""
     query = update.callback_query
-    query.answer()
+    await query.answer()
     
     transactions = get_user_transactions(query.from_user.id)
     
     if not transactions:
-        query.edit_message_text("📋 You have no transactions yet.")
+        await query.edit_message_text("📋 You have no transactions yet.")
         return
     
     message = "📋 Your Recent Transactions:\n\n"
@@ -261,43 +265,40 @@ def show_user_transactions(update: Update, context: CallbackContext) -> None:
             f"Status: **{txn[6]}**\n\n"
         )
     
-    query.edit_message_text(
+    await query.edit_message_text(
         message,
         parse_mode="Markdown"
     )
 
-def help_command(update: Update, context: CallbackContext) -> None:
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send help information"""
-    update.message.reply_text(
+    await update.message.reply_text(
         "Need help?\n\n"
-        "Contact Safaricom customer care:\n"
-        "📞 0722000000\n"
+        "Contact MAXWELL customer care:\n"
+        "📞 0743518481\n"
         "🕒 24/7 support\n\n"
         "To start over, type /start"
     )
 
 def main() -> None:
     """Start the bot"""
-    updater = Updater(TELEGRAM_TOKEN)
-    dispatcher = updater.dispatcher
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
 
     # Command handlers
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
     
     # Callback query handlers
-    dispatcher.add_handler(CallbackQueryHandler(show_bundles, pattern='^(data|sms|voice)$'))
-    dispatcher.add_handler(CallbackQueryHandler(request_phone_number, pattern='^select_'))
-    dispatcher.add_handler(CallbackQueryHandler(check_payment_status, pattern='^(check|resend|cancel)_'))
-    dispatcher.add_handler(CallbackQueryHandler(show_user_transactions, pattern='^my_transactions$'))
-    dispatcher.add_handler(CallbackQueryHandler(start, pattern='^back$'))
+    application.add_handler(CallbackQueryHandler(show_bundles, pattern='^(data|sms|voice)$'))
+    application.add_handler(CallbackQueryHandler(request_phone_number, pattern='^select_'))
+    application.add_handler(CallbackQueryHandler(check_payment_status, pattern='^(check|resend|cancel)_'))
+    application.add_handler(CallbackQueryHandler(show_user_transactions, pattern='^my_transactions$'))
+    application.add_handler(CallbackQueryHandler(start, pattern='^back$'))
     
     # Message handler for phone number input
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, process_phone_number))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, process_phone_number))
 
-    # Start the Bot
-    updater.start_polling()
-    updater.idle()
+    application.run_polling()
 
 if __name__ == '__main__':
     main()
